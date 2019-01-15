@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en" ng-app="JpegInfoApp">
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <title>JPEG info</title>
+
+    <!-- Bootstrap -->
+	<!--
+    <link href="bootstrap/css/bootstrap.min.css" rel="stylesheet">
+	-->
+
+	<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+
+    <!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js"></script>
+
+    <!-- Bootstrap script -->
+	<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+
+    <!-- AngularJS + other Angular components / plugins / extensions -->
+	<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/angularjs/1.7.5/angular.min.js"></script>
+	<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/angularjs/1.7.5/angular-cookies.min.js"></script>
+	<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/angularjs/1.7.5/angular-messages.min.js"></script>
+	<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/angularjs/1.7.5/angular-animate.min.js"></script>
+	<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/angularjs/1.7.5/angular-sanitize.js"></script>
+	
+
+    <!-- Application Angular controllers & services -->
+    <script type="text/javascript" src="file_drop_zone.js"></script>
+
+    <!-- Other application script -->
+    <script type="text/javascript" src="exif-reader.js"></script>
+    <script type="text/javascript" src="encoding-indexes.js"></script>
+    <script type="text/javascript" src="encoding.js"></script>
+
+    <script type="application/javascript" src="iptc-consts.js"></script>
+
+    <style type="text/css">
+    html, body {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+
+    }
+
+    textarea {
+        font-family: monospace;
+        font-size: 8pt;
+    }
+
+    .centred {
+        text-align: center;
+    }
+
+    .no-bottom-margin {
+        margin-bottom: 0px;
+    }
+
+    .picture-drop-pad
+    {
+        width: 210px;
+        height: 210px;
+        line-height: 200px;
+        border: 2px dashed #808080;
+        background-color: #D0FFD0;
+        text-align: center;
+        border-radius: 6px;
+        font-size: 40px;
+        color: #808080;
+    }
+
+    .picture-preview
+    {
+        padding: 2px;
+    }
+
+    .tag-section-title-row {
+        background-color: darkgray;
+        color: white;
+        border: solid thin black;
+        text-align: left;
+    }
+
+    .odd-row {
+        background-color: #EEEEEE;
+        padding-left: 2px;
+        padding-right: 2px;
+    }
+
+    .even-row {
+        background-color: white;
+        padding-left: 2px;
+        padding-right: 2px;
+    }
+
+    .file-browse-button
+    {
+        width: 120px;
+        font-weight: normal;
+    }
+
+    .keyframe-preview
+    {
+        height: 80px;
+        border: 1px solid #808080;
+    }
+
+    .file-drop-activate
+    {
+        background-color: #FFD0D0;
+    }
+
+    .file-drop span
+    {
+        vertical-align: middle;
+    }
+
+    .dropped-files-list
+    {
+        width: 100%;
+        height: 100px;
+    }
+    </style>
+
+<script type="application/javascript">
+
+    // Application module instance
+    var appModule = angular.module( 'JpegInfoApp', ['ngAnimate', 'dropzoneDirective']);
+
+    // Create the AngularJS controller
+    appModule.controller('JpegInfoController', ['$scope', '$log', '$window',
+                                                function ($scope, $log, $window)
+    {
+        var self = this;
+
+        // Constants
+        const k_THUMBNAIL_SIZE = 200;
+        
+        // Information about the dropped file, if any
+        self.imageInfo = {
+            img: null,          // Loaded Image object
+            dataUrl: null,
+            fileName: "",
+            metadataFields: []
+        };
+
+        /**
+            Method:     $onInit
+            Explicit onInit handler for the controller, which does any one-off initialisation.
+         */
+        this.$onInit = function () {
+            $log.info ("$onInit");
+        };
+
+        /**
+            Method:     $onDestroy
+            Explicit onDestroy handler for the controller, which releases resources.
+         */
+        this.$onDestroy = function () {
+            $log.info ("$onDestroy");
+        };
+
+        /**
+            Method:     setImages
+            Parameters: files : array of File from either drag & drop or popup file selector.
+            Processes selected images files.
+         */
+        self.setImages = function (files) {
+
+            var numUnsupportedFiles = 0;
+            var num = files.length > 1 ? 1 : files.length;
+            for (let i=0 ; i<num ; i++) {
+
+                let f = files[i];
+
+                // Check the file's Mime type
+                if (f.type == "image/jpeg") {
+
+                    // Save the file name
+                    self.imageInfo.fileName = f.name;
+
+                    // Read the file in as an ArrayBuffer
+                    let reader = new FileReader();
+                    reader.onload = function(ev) {
+                        try {
+                            var jpegData = ev.target.result;    // ArrayBuffer
+
+                            // Now use ExifReader to read embedded metadata
+                            var tags = [];
+                            try {
+                                tags = ExifReader.load(jpegData, {expanded: true});
+                            } catch (e) {
+                                $log.log ("ExifReader.load exception : " + e);
+                            }
+                            self.imageInfo.metadataFields = [];
+
+                            // Iterate through the tag types (IPTC, EXIF, and XMP)
+                            var tagTypes = ['iptc', 'exif', 'xmp'];
+                            for (let tagType of tagTypes) {
+
+                                // Fetch the tags of this type
+                                if (tagType in tags) {
+                                    tagList = tags[tagType];
+
+                                    // Create an initial array of tags for this type
+                                    if (!self.imageInfo.metadataFields[tagType])
+                                        self.imageInfo.metadataFields[tagType] = [];
+
+                                    // Iterate through the tags
+                                    for (t in tagList) {
+                                    
+                                        // Handle the case that it's a repeated tag (Array)
+                                        if (tagList[t] instanceof Array) {
+                                            for (var j=0 ; j<tagList[t].length ; j++) {
+                                                tag = tagList[t][j];
+                                                var m = {
+                                                    name: t,
+                                                    id: tag.id,
+                                                    value: tag.description
+                                                };
+                                                self.imageInfo.metadataFields[tagType].push (m);
+                                            }
+                                        }
+                                        else {
+                                            tag = tagList[t];
+                                            var m = {
+                                                name: t,
+                                                id: tag.id,
+                                                value: tag.description
+                                            };
+                                            self.imageInfo.metadataFields[tagType].push (m);
+                                        }
+                                    }
+                                }
+
+                            }
+
+                            // Now use a second FileReader to read the image dataUrl
+                            var reader2 = new FileReader();
+                            reader2.onload = function(ev) {
+                                try {
+                                    // Get the loaded data URL
+                                    var dataURL = ev.target.result;
+
+                                    // Parse into an Image
+                                    var img = new Image();
+                                    img.onload = function () {
+
+                                        // Store the data URL against the Image
+                                        img.dataUrl = dataURL;
+
+                                        // The image width and height are now in img.width and img.height
+                                        self.imageInfo.img = img;
+
+                                        // Need to perform a scope.$apply() to make AngularJS see the data change as we're making changes outside of the Angular's scope here
+                                        // See https://github.com/angular-ui/ui-grid/issues/1302
+                                        $scope.$apply ();
+                                    };
+                                    img.src = dataURL;
+
+                                } catch (e) {
+                                    $log.log ("onload#2 exception : " + e);
+                                    $scope.$apply ();
+                                }
+                            };
+                            reader2.readAsDataURL (f);
+
+                        } catch (e) {
+                            $log.log ("onload exception : " + e);
+                            $scope.$apply ();
+                        }
+                    };
+                    reader.readAsArrayBuffer (f);
+                }
+                else {
+                    // Unsupported file type
+                    numUnsupportedFiles++;
+                    $log.log ("Selected file '" + f.name + "' is an unsupported type '" + f.type + "'");
+                }
+            }
+        };
+
+        self.getHeadline = function (id) {
+
+            if (self.imageInfo.metadataFields['iptc']) {
+                var m = self.imageInfo.metadataFields['iptc'].find (function (el) {
+                    return el.id == DatasetId.HEADLINE;
+                });
+                if (m !== undefined) {
+                    return m.value;
+                }
+            }
+
+            return "";
+        };
+
+        self.getDisplayDatasetId = function (id) {
+            
+            var record = Math.floor (id / 256);
+            var dataset = id % 256;
+            return record + ":" + dataset;
+        };
+
+        self.getImageUrl = function () {
+            
+            if (self.imageInfo.img && self.imageInfo.img.dataUrl)
+                return self.imageInfo.img.dataUrl;
+            return "drop-plus.png";
+        };
+
+        self.getThumbnailSize = function () {
+            
+            if (self.imageInfo.img && self.imageInfo.img.width && self.imageInfo.img.height) {
+                
+                if (self.imageInfo.img.width > self.imageInfo.img.height) {
+                    return {
+                        width: k_THUMBNAIL_SIZE,
+                        height: (k_THUMBNAIL_SIZE * self.imageInfo.img.height) / self.imageInfo.img.width
+                    };
+                }
+                else {
+                    return {
+                        height: k_THUMBNAIL_SIZE,
+                        width: (k_THUMBNAIL_SIZE * self.imageInfo.img.width) / self.imageInfo.img.height
+                    };
+                }
+            }
+            else {
+                return {
+                    width: k_THUMBNAIL_SIZE,
+                    height: k_THUMBNAIL_SIZE
+                };
+            }
+        };
+        
+    }]);
+
+</script>
+    </head>
+
+    <body no-drop ng-controller="JpegInfoController as c">
+
+        <div class="container-fluid">
+
+            <div class="row">
+
+                <!-- Drop pad -->
+                <div class="col-md-2">
+                    <div class="form-group">
+                        <label for="dropJpegPad">Drop a JPEG image</label>
+                        <div id="dropJpegPad" class="picture-drop-pad" drop-zone dropped-file-list-handler="c.setImages">
+                            <img ng-src="{{c.getImageUrl()}}" width="{{c.getThumbnailSize().width}}" height="{{c.getThumbnailSize().height}}" class="picture-preview" id="id_picture_preview">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-10">
+                </div>
+
+            </div>
+
+            <div class="row">
+                <div class="col-md-1"><b>File name</b></div>
+                <div class="col-md-11">{{c.imageInfo.fileName}}</div>
+            </div>
+            <div class="row">
+                <div class="col-md-1"><b>Headline</b></div>
+                <div class="col-md-11">{{c.getHeadline()}}</div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-12 tag-section-title-row"><b>IPTC/NAA</b></div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-1"><b>ID</b></div>
+                <div class="col-md-2"><b>Name</b></div>
+                <div class="col-md-9"><b>Value</b></div>
+            </div>
+
+            <div class="row" ng-repeat="tag in c.imageInfo.metadataFields['iptc']" ng-class-odd="'odd-row'" ng-class-even="'even-row'">
+                <div class="col-md-1">{{c.getDisplayDatasetId(tag.id)}}</div>
+                <div class="col-md-2">{{tag.name}}</div>
+                <div class="col-md-9">{{tag.value}}</div>
+            </div>
+
+            
+            <div class="row">
+                <div class="col-md-12 tag-section-title-row"><b>EXIF</b></div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-1"><b>ID</b></div>
+                <div class="col-md-2"><b>Name</b></div>
+                <div class="col-md-9"><b>Value</b></div>
+            </div>
+
+            <div class="row" ng-repeat="tag in c.imageInfo.metadataFields['exif']" ng-class-odd="'odd-row'" ng-class-even="'even-row'">
+                <div class="col-md-1">{{tag.id}}</div>
+                <div class="col-md-2">{{tag.name}}</div>
+                <div class="col-md-9">{{tag.value}}</div>
+            </div>
+
+
+            <div class="row">
+                <div class="col-md-12 tag-section-title-row"><b>XMP</b></div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-1"><b>ID</b></div>
+                <div class="col-md-2"><b>Name</b></div>
+                <div class="col-md-9"><b>Value</b></div>
+            </div>
+
+            <div class="row" ng-repeat="tag in c.imageInfo.metadataFields['xmp']" ng-class-odd="'odd-row'" ng-class-even="'even-row'">
+                <div class="col-md-1">{{tag.id}}</div>
+                <div class="col-md-2">{{tag.name}}</div>
+                <div class="col-md-9">{{tag.value}}</div>
+            </div>
+
+        </div>
+
+    </body>
+
+</html>
